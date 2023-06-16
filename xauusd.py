@@ -11,23 +11,36 @@ connected_clients = set()
 options = Options()
 options.add_argument('--headless')
 driver = webdriver.Chrome(options=options)
-link = "https://www.tradingview.com/symbols/XAUUSD/?exchange=OANDA"
+base_link = "https://www.tradingview.com/symbols/"
 data = []
 previous_price = None
-driver.get(link)
 wait = WebDriverWait(driver, 10)
 
 
-async def handle_client(websocket, path):
+async def handle_client(websocket):
     global previous_price
     connected_clients.add(websocket)
     try:
+        symbol = await websocket.recv()
+        link = base_link + symbol
+        driver.get(link)
+
         while True:
-            await asyncio.sleep(1)  # Adjust the sleep duration as needed
-            data = generate_data()
-            if data != previous_price:
-                await websocket.send(str(data))
-                previous_price = data
+            dataa = generate_data()
+
+            if dataa != previous_price:
+                await websocket.send(str(dataa))
+                previous_price = dataa
+
+            try:
+                symbol = await asyncio.wait_for(websocket.recv(), timeout=1)
+                link = base_link + symbol
+                driver.get(link)
+            except asyncio.TimeoutError:
+                pass
+
+    except websockets.exceptions.ConnectionClosed:
+        pass
     finally:
         connected_clients.remove(websocket)
 
@@ -36,7 +49,10 @@ async def start_server():
     server = await websockets.serve(handle_client, "localhost", 8765)
 
     async with server:
-        await server.serve_forever()
+        while True:
+            await asyncio.sleep(0.1)
+            if connected_clients:
+                await asyncio.wait([handle_client(client) for client in connected_clients], timeout=0.1)
 
 
 def generate_data():
